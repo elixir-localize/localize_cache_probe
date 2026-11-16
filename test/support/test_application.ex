@@ -111,12 +111,15 @@ defmodule LocalizeCacheProbe.TestApplication do
     end
   end
 
+  # Every response has a `vary` line for the encoding, as a server that
+  # compresses adds one, so the fields the locale was read from arrive
+  # on a second line.
   defp vary_headers([]) do
-    []
+    [{"Vary", "accept-encoding"}]
   end
 
   defp vary_headers([_ | _] = fields) do
-    [{"Vary", Enum.join(fields, ", ")}]
+    [{"Vary", "accept-encoding"}, {"Vary", Enum.join(fields, ", ")}]
   end
 
   defp session(request, locale, state) do

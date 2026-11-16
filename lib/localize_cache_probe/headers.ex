@@ -96,11 +96,50 @@ defmodule LocalizeCacheProbe.Headers do
   @spec members(t(), String.t()) :: [String.t()]
   def members(headers, name) when is_list(headers) and is_binary(name) do
     headers
+    |> members_by_line(name)
+    |> Enum.concat()
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Returns the members of a comma-separated header, one list for each of
+  its lines.
+
+  Each member is trimmed and put in lower case, and empty members are
+  left out. This keeps what `members/2` discards: which line named which
+  member, and so which members a recipient that read only one line
+  would miss.
+
+  ### Arguments
+
+  * `headers` is a list of `{name, value}` response headers.
+
+  * `name` is the header name in lower case.
+
+  ### Returns
+
+  * A list with one list of members for each line, in the order
+    received. It is empty when the header is absent.
+
+  ### Examples
+
+      iex> headers = [{"vary", "accept-encoding"}, {"vary", "Cookie, Accept-Language"}]
+      iex> LocalizeCacheProbe.Headers.members_by_line(headers, "vary")
+      [["accept-encoding"], ["cookie", "accept-language"]]
+
+  """
+  @spec members_by_line(t(), String.t()) :: [[String.t()]]
+  def members_by_line(headers, name) when is_list(headers) and is_binary(name) do
+    headers
     |> all(name)
-    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.map(&line_members/1)
+  end
+
+  defp line_members(value) do
+    value
+    |> String.split(",")
     |> Enum.map(&normalise/1)
     |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
   end
 
   defp normalise(member) do

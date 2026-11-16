@@ -26,6 +26,7 @@ defmodule LocalizeCacheProbe.Observation do
             html_lang: nil,
             vary: [],
             vary_lines: 0,
+            vary_by_line: [],
             cache_control: [],
             set_cookie?: false,
             cache_vendor: :unknown,
@@ -42,7 +43,8 @@ defmodule LocalizeCacheProbe.Observation do
   * `:language` is `:content_language`, or `:html_lang` when that is `nil`.
 
   * `:vary` is the members of every `vary` line combined, and
-    `:vary_lines` is how many lines carried them.
+    `:vary_lines` is how many lines carried them. `:vary_by_line` keeps
+    the members of each line apart, in the order received.
 
   * `:cache_control` is the directives of every `cache-control` line.
 
@@ -63,6 +65,7 @@ defmodule LocalizeCacheProbe.Observation do
           html_lang: String.t() | nil,
           vary: [String.t()],
           vary_lines: non_neg_integer(),
+          vary_by_line: [[String.t()]],
           cache_control: [String.t()],
           set_cookie?: boolean(),
           cache_vendor: Cache.vendor(),
@@ -109,6 +112,7 @@ defmodule LocalizeCacheProbe.Observation do
       html_lang: html_lang,
       vary: Headers.members(headers, "vary"),
       vary_lines: length(Headers.all(headers, "vary")),
+      vary_by_line: Headers.members_by_line(headers, "vary"),
       cache_control: Headers.members(headers, "cache-control"),
       set_cookie?: match?([_ | _], Headers.all(headers, "set-cookie")),
       cache_vendor: Cache.vendor(headers),

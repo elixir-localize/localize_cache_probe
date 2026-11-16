@@ -42,6 +42,7 @@ defmodule LocalizeCacheProbe.ObservationTest do
 
       assert observation.vary == ["accept-language", "accept-encoding", "cookie"]
       assert observation.vary_lines == 2
+      assert observation.vary_by_line == [["accept-language"], ["accept-encoding", "cookie"]]
     end
 
     test "has no vary members and no lines when the header is absent" do
@@ -49,6 +50,7 @@ defmodule LocalizeCacheProbe.ObservationTest do
 
       assert observation.vary == []
       assert observation.vary_lines == 0
+      assert observation.vary_by_line == []
     end
 
     test "reads the cache-control directives" do

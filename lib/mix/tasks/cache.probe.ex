@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Cache.Probe do
       mix cache.probe https://example.com/pricing --locales fr,de
 
   The page is one whose URL holds no locale. Run it only against an
-  application you operate: it sends about 30 `GET` requests, and the
+  application you operate: it sends about 40 `GET` requests, and the
   cache in front of the application may store what comes back.
 
   The task exits with status 1 when a visitor is served the wrong

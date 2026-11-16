@@ -41,6 +41,13 @@ defmodule LocalizeCacheProbe.Scenario do
     whether the cache stores a response that sets a cookie, and whether
     it then hands that cookie to someone else.
 
+  * `:vary_lines` — a response may carry its `vary` on several header
+    lines, and a cache has to read them all. The scenario repeats the
+    checks on `accept-language` and on the cookie, and reports each
+    against the line that named it. It is skipped unless a response
+    reaches the probe with one of those fields among two or more lines,
+    which a cache that joins the lines prevents.
+
   """
 
   alias LocalizeCacheProbe.Observation
@@ -55,7 +62,8 @@ defmodule LocalizeCacheProbe.Scenario do
     :header_form,
     :region,
     :url_locale,
-    :first_visit
+    :first_visit,
+    :vary_lines
   ]
 
   @titles %{
@@ -66,7 +74,8 @@ defmodule LocalizeCacheProbe.Scenario do
     header_form: "One visitor, two forms of the same accept-language",
     region: "Two visitors whose browsers ask for different regions of one language",
     url_locale: "Two visitors at the page with a locale in its URL",
-    first_visit: "Two new visitors, when the first response sets a cookie"
+    first_visit: "Two new visitors, when the first response sets a cookie",
+    vary_lines: "A response whose vary is on more than one line"
   }
 
   # A response with any of these may not be reused from a shared cache.
@@ -186,24 +195,8 @@ defmodule LocalizeCacheProbe.Scenario do
   end
 
   def run(:stored_locale, %Target{locales: [asked, stored | _rest]} = target) do
-    first = Visitor.new("A", accept_language: asked)
-    second = Visitor.new("B", accept_language: asked)
-
-    # A requests the page twice: a cache that will not store the response
-    # that sets A's cookie can store the one after it.
-    with {:ok, _first, primed} <- visits(first, target.url, 2, []),
-         {:ok, second, chosen} <- step(second, Target.choose_url(target, stored)),
-         {:ok, second, control} <- step(second, control_url(target.url)),
-         {:ok, _second, served} <- step(second, target.url) do
-      labels = %{
-        who: "The visitor who chose #{stored}",
-        wanted: stored,
-        hint: "it does not store the choice, or the choose URL is wrong"
-      }
-
-      {verdict, summary} = page_verdict(control.observation, served.observation, labels)
-
-      {:ok, result(:stored_locale, verdict, summary, primed ++ [chosen, control, served])}
+    with {:ok, {verdict, summary}, steps} <- stored_check(target, asked, stored) do
+      {:ok, result(:stored_locale, verdict, summary, steps)}
     end
   end
 
@@ -275,6 +268,18 @@ defmodule LocalizeCacheProbe.Scenario do
       {verdict, summary} = first_visit_verdict(facts)
 
       {:ok, result(:first_visit, verdict, summary, [primed, served, control])}
+    end
+  end
+
+  def run(:vary_lines, %Target{locales: [asked, other | _rest]} = target) do
+    hint = "it may not read accept-language"
+
+    with {:ok, header, header_steps} <- browsers_check(target.url, asked, other, hint),
+         {:ok, cookie, cookie_steps} <- stored_check(target, asked, other) do
+      checks = [{"accept-language", header, header_steps}, {"cookie", cookie, cookie_steps}]
+      {verdict, summary} = vary_lines_verdict(Enum.flat_map(checks, &line_check/1))
+
+      {:ok, result(:vary_lines, verdict, summary, header_steps ++ cookie_steps)}
     end
   end
 
@@ -375,6 +380,16 @@ defmodule LocalizeCacheProbe.Scenario do
   # browser asks for what the second one's does, makes the control
   # request: a new visitor, so that no cookie from the page decides.
   defp two_browsers(name, url, first_locale, second_locale, hint) do
+    with {:ok, {verdict, summary}, steps} <-
+           browsers_check(url, first_locale, second_locale, hint) do
+      {:ok, result(name, verdict, summary, steps)}
+    end
+  end
+
+  # The requests of `two_browsers/5` and their outcome, for a scenario to
+  # report as its own or to combine with another's. This is the check on
+  # `accept-language`: neither visitor has a cookie, so it alone decides.
+  defp browsers_check(url, first_locale, second_locale, hint) do
     first = Visitor.new("A", accept_language: first_locale)
     second = Visitor.new("C", accept_language: second_locale)
     third = Visitor.new("D", accept_language: second_locale)
@@ -388,10 +403,112 @@ defmodule LocalizeCacheProbe.Scenario do
         hint: hint
       }
 
-      {verdict, summary} = page_verdict(control.observation, served.observation, labels)
+      outcome = page_verdict(control.observation, served.observation, labels)
 
-      {:ok, result(name, verdict, summary, [primed, served, control])}
+      {:ok, outcome, [primed, served, control]}
     end
+  end
+
+  # The check on the cookie: one visitor's page is requested first, and
+  # another, who has chosen a different locale, requests it after.
+  defp stored_check(target, asked, stored) do
+    first = Visitor.new("A", accept_language: asked)
+    second = Visitor.new("B", accept_language: asked)
+
+    # A requests the page twice: a cache that will not store the response
+    # that sets A's cookie can store the one after it.
+    with {:ok, _first, primed} <- visits(first, target.url, 2, []),
+         {:ok, second, chosen} <- step(second, Target.choose_url(target, stored)),
+         {:ok, second, control} <- step(second, control_url(target.url)),
+         {:ok, _second, served} <- step(second, target.url) do
+      labels = %{
+        who: "The visitor who chose #{stored}",
+        wanted: stored,
+        hint: "it does not store the choice, or the choose URL is wrong"
+      }
+
+      outcome = page_verdict(control.observation, served.observation, labels)
+
+      {:ok, outcome, primed ++ [chosen, control, served]}
+    end
+  end
+
+  # Where a field is named among the `vary` lines of a response that has
+  # two or more of them: the number of its line and how many there are.
+  defp vary_line(field, steps) do
+    steps
+    |> Enum.map(& &1.observation.vary_by_line)
+    |> Enum.find_value(&line_of(field, &1))
+  end
+
+  defp line_of(field, [_first, _second | _rest] = lines) do
+    index = Enum.find_index(lines, &(field in &1))
+
+    if is_nil(index) do
+      nil
+    else
+      {index + 1, length(lines)}
+    end
+  end
+
+  defp line_of(_field, _lines) do
+    nil
+  end
+
+  # One entry for each field that was named among several `vary` lines,
+  # with the outcome of the check on that field.
+  defp line_check({field, {verdict, _summary}, steps}) do
+    case vary_line(field, steps) do
+      {line, lines} -> [%{field: field, line: line, lines: lines, verdict: verdict}]
+      nil -> []
+    end
+  end
+
+  defp vary_lines_verdict([]) do
+    {:skipped,
+     "No response reached the probe with accept-language or cookie named among two or more " <>
+       "vary lines. A cache may join the lines before it sends them on."}
+  end
+
+  defp vary_lines_verdict([_ | _] = checks) do
+    failed = Enum.find(checks, &(&1.verdict == :wrong_language))
+    passed = Enum.filter(checks, &(&1.verdict == :correct))
+    untested = Enum.filter(checks, &(&1.verdict == :skipped))
+
+    vary_lines_outcome(failed, passed, untested)
+  end
+
+  defp vary_lines_outcome(%{} = failed, _passed, _untested) do
+    {:wrong_language,
+     "The cache did not honour #{failed.field}, which arrived on " <> position(failed) <> "."}
+  end
+
+  defp vary_lines_outcome(nil, [], _untested) do
+    {:skipped,
+     "The fields arrived on several vary lines, but the application did not serve the " <>
+       "locales needed to test them."}
+  end
+
+  defp vary_lines_outcome(nil, [_ | _] = passed, untested) do
+    honoured = Enum.map_join(passed, " and ", &"#{&1.field}, on #{position(&1)}")
+
+    {:correct, "The cache honoured #{honoured}." <> untested_note(untested)}
+  end
+
+  # A field that arrived among several lines and could not be tested is
+  # named, so that a verdict of correct is not read as covering it.
+  defp untested_note([]) do
+    ""
+  end
+
+  defp untested_note([_ | _] = untested) do
+    fields = Enum.map_join(untested, " and ", & &1.field)
+
+    " It could not test #{fields}: the application did not serve the locale needed."
+  end
+
+  defp position(%{line: line, lines: lines}) do
+    "line #{line} of #{lines} vary lines"
   end
 
   # The page's URL with a parameter no request has carried before, so

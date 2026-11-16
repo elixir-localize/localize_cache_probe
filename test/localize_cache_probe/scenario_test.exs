@@ -227,7 +227,8 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         header_form: :not_reused,
         region: :correct,
         url_locale: :not_reused,
-        first_visit: :not_reused
+        first_visit: :not_reused,
+        vary_lines: :correct
       ],
       # Once the session holds the locale it decides, so `vary` names
       # only the cookie and a longer accept-language is served the copy.
@@ -239,7 +240,8 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         header_form: :shared,
         region: :correct,
         url_locale: :shared,
-        first_visit: :not_reused
+        first_visit: :not_reused,
+        vary_lines: :correct
       ],
       # This cache replays the cookie it stored with the first response, so
       # both visitors end up holding it and cannot be told apart.
@@ -251,7 +253,8 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         header_form: :shared,
         region: :wrong_language,
         url_locale: :shared,
-        first_visit: :shared_cookie
+        first_visit: :shared_cookie,
+        vary_lines: :wrong_language
       ]
     }
 
@@ -280,7 +283,7 @@ defmodule LocalizeCacheProbe.ScenarioTest do
       assert Enum.all?(result.steps, &String.ends_with?(&1.url, "/de/pricing"))
       assert Enum.all?(result.steps, &(&1.accept_language == "fr"))
       assert Enum.all?(result.steps, &(&1.observation.language == "de"))
-      assert List.last(result.steps).observation.vary == []
+      assert List.last(result.steps).observation.vary == ["accept-encoding"]
     end
 
     test "the region scenario sends each region as accept-language" do
@@ -446,6 +449,102 @@ defmodule LocalizeCacheProbe.ScenarioTest do
                Scenario.run(:url_locale, localized_target([first, hit, second, hit, hit]))
 
       assert summary =~ "with a cookie of their own"
+    end
+  end
+
+  describe "the vary-lines scenario" do
+    # The eight requests are the accept-language check (A, C and the
+    # control D) and then the cookie check (A twice, B choosing, B's
+    # control and B's page).
+    defp responses(languages, vary) do
+      for language <- languages do
+        page(language, vary)
+      end
+    end
+
+    @two_lines [{"Vary", "accept-encoding"}, {"Vary", "Cookie, Accept-Language"}]
+    @one_line [{"Vary", "accept-encoding, cookie, accept-language"}]
+    @served ["fr", "de", "de", "fr", "fr", "de", "de", "de"]
+
+    test "is :correct, naming each field's line, when the cache honours both" do
+      assert {:ok, result} = Scenario.run(:vary_lines, target(responses(@served, @two_lines)))
+
+      assert result.verdict == :correct
+
+      assert result.summary ==
+               "The cache honoured accept-language, on line 2 of 2 vary lines and cookie, " <>
+                 "on line 2 of 2 vary lines."
+
+      assert Enum.map(result.steps, & &1.visitor) == ["A", "C", "D", "A", "A", "B", "B", "B"]
+    end
+
+    test "is :wrong_language, naming the field and its line, when one is not honoured" do
+      header_ignored = List.replace_at(@served, 1, "fr")
+
+      assert {:ok, %{verdict: :wrong_language, summary: summary}} =
+               Scenario.run(:vary_lines, target(responses(header_ignored, @two_lines)))
+
+      assert summary ==
+               "The cache did not honour accept-language, which arrived on line 2 of 2 vary lines."
+
+      cookie_ignored = List.replace_at(@served, 7, "fr")
+
+      assert {:ok, %{verdict: :wrong_language, summary: summary}} =
+               Scenario.run(:vary_lines, target(responses(cookie_ignored, @two_lines)))
+
+      assert summary ==
+               "The cache did not honour cookie, which arrived on line 2 of 2 vary lines."
+    end
+
+    test "reports a field by the line that named it" do
+      vary = [{"Vary", "Accept-Language"}, {"Vary", "accept-encoding"}, {"Vary", "cookie"}]
+
+      assert {:ok, %{verdict: :correct, summary: summary}} =
+               Scenario.run(:vary_lines, target(responses(@served, vary)))
+
+      assert summary =~ "accept-language, on line 1 of 3 vary lines"
+      assert summary =~ "cookie, on line 3 of 3 vary lines"
+    end
+
+    test "leaves out a field that no line names" do
+      vary = [{"Vary", "accept-encoding"}, {"Vary", "accept-language"}]
+
+      assert {:ok, %{verdict: :correct, summary: summary}} =
+               Scenario.run(:vary_lines, target(responses(@served, vary)))
+
+      assert summary == "The cache honoured accept-language, on line 2 of 2 vary lines."
+    end
+
+    test "names a field it could not test beside the one it could" do
+      # The visitor who chose `de` is served `fr` even at the control URL,
+      # so the cookie cannot be tested, while accept-language can.
+      languages = ["fr", "de", "de", "fr", "fr", "de", "fr", "fr"]
+
+      assert {:ok, %{verdict: :correct, summary: summary}} =
+               Scenario.run(:vary_lines, target(responses(languages, @two_lines)))
+
+      assert summary ==
+               "The cache honoured accept-language, on line 2 of 2 vary lines. It could not " <>
+                 "test cookie: the application did not serve the locale needed."
+    end
+
+    test "is :skipped when vary arrives on one line, or not at all" do
+      for vary <- [@one_line, []] do
+        assert {:ok, %{verdict: :skipped, summary: summary, steps: steps}} =
+                 Scenario.run(:vary_lines, target(responses(@served, vary)))
+
+        assert summary =~ "A cache may join the lines"
+        assert length(steps) == 8
+      end
+    end
+
+    test "is :skipped when the application serves neither locale needed to test the fields" do
+      languages = List.duplicate("fr", 8)
+
+      assert {:ok, %{verdict: :skipped, summary: summary}} =
+               Scenario.run(:vary_lines, target(responses(languages, @two_lines)))
+
+      assert summary =~ "did not serve the locales needed"
     end
   end
 

@@ -25,6 +25,14 @@ defmodule LocalizeCacheProbe.HeadersTest do
     assert Headers.all(@headers, "age") == []
   end
 
+  test "members_by_line/2 keeps each line's members apart, repeats included" do
+    assert Headers.members_by_line(@headers, "vary") ==
+             [["accept-language"], ["accept-encoding", "cookie"], ["accept-language"]]
+
+    assert Headers.members_by_line(@headers, "age") == []
+    assert Headers.members_by_line([{"vary", ""}, {"vary", " , "}], "vary") == [[], []]
+  end
+
   test "members/2 combines the lines, trimmed, lower case and unique" do
     assert Headers.members(@headers, "vary") == ["accept-language", "accept-encoding", "cookie"]
     assert Headers.members(@headers, "age") == []
