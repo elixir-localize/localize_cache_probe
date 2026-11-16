@@ -78,7 +78,7 @@ Each scenario starts from whatever the cache already holds, so an earlier scenar
 | `/two-vary/page` | The default configuration behind a plug that sets a `vary` line first. |
 | `/visitor/page` | The default configuration, with a value of the visitor's own in the session. |
 | `/private-session/page` | The default configuration, with `cache-control: private` on a response that writes the session. |
-| `/chosen/page` | The default sources, storing the locale only when the request named one. |
+| `/chosen/page` | The default sources, with `PutSession, from: [:route, :path, :query, :body]`: only a locale the visitor chose is stored. |
 | `/chosen-private/page` | `/chosen/page` and `/private-session/page` together. |
 
 Each also answers with a locale in the path, such as `/default/de/page`.
@@ -153,7 +153,7 @@ What the table shows:
 
 ### Two changes, tried
 
-Two configurations try changes that have been discussed and are not in `localize_web`. `/private-session` sends `cache-control: private` on a response that writes the session. `/chosen` stores the locale only when the request named one, so a visitor who never chose is given no cookie. `/chosen-private` does both. Every scenario not listed gave the same verdict as `/default`.
+Three configurations try changes that came out of these results. `/private-session` sends `cache-control: private` on a response that writes the session, which an application does for itself. `/chosen` stores the locale only when the visitor chose it, with the `:from` option `Localize.Plug.PutSession` gained in `localize_web` 1.4.0, so a visitor who never chose is given no cookie. `/chosen-private` does both. Every scenario not listed gave the same verdict as `/default`.
 
 | Scenario | `/default` | `/private-session` | `/chosen` | `/chosen-private` |
 |---|---|---|---|---|
@@ -168,6 +168,8 @@ Two configurations try changes that have been discussed and are not in `localize
 * **It has a cost: each form of `accept-language` gets a copy of its own.** Under `/default` the session decides after the first visit, so the header no longer matters. Under `/chosen` the header goes on deciding for a visitor who never chose, and a cache that does not normalise it stores one copy for each way a browser writes it.
 
 * **Both together are correct behind all three caches and lose no choice.**
+
+* **Make a response private when the session is written, not whenever the locale came from the URL.** A first version of `/chosen-private` sent `private` for any request whose locale came from a stored source. A locale in the path is on every request for that page, so the page with the locale in its URL was never stored: "Locale in the URL: not cached" behind all three.
 
 ## Recognising the cache
 

@@ -20,6 +20,8 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 
 ## Done
 
+* [x] **`/chosen` on the real option** — the reference origin uses `Localize.Plug.PutSession, from: [...]` from `localize_web` 1.4.0 in place of its own sketch, with the same verdicts; `/chosen-private` goes private on a session write, after going private by source kept the URL-locale page out of every cache. 2026-11-17.
+
 * [x] **Storing only a chosen locale, tried** — `/chosen/page` and `/chosen-private/page` in the reference origin; two new visitors then share a copy behind every cache, at the cost of a copy for each form of `accept-language`. The first-visit scenario now reports that reuse when no cookie is set. 2026-11-17.
 
 * [x] **`cache-control: private` when the session is written** — `/private-session/page` in the reference origin; behind `plug_http_cache` the second visitor's choice is then stored and every verdict matches Varnish and nginx. 2026-11-17.

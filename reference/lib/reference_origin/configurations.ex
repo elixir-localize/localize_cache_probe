@@ -161,23 +161,21 @@ defmodule ReferenceOrigin.Chosen do
   @moduledoc """
   The default sources, storing the locale only when the visitor chose it.
 
-  `Localize.Plug.PutSession` stores whatever locale was resolved, a
-  guess from `accept-language` included, so every first visit sets a
-  cookie. This configuration stores the locale only when the request
-  named one, in its query or its path, and so sets no cookie for a
-  visitor who never chose. It is a sketch of a change that has been
-  proposed for `localize_web`, made here with a plug of the origin's own.
+  `Localize.Plug.PutSession` stores every locale by default, a guess
+  from `accept-language` included, so every first visit sets a cookie.
+  Its `:from` option names the sources whose locale is stored. Here that
+  is the URL and the query, so a visitor who never chose is given no
+  cookie.
 
   """
 
   use Plug.Builder
 
   plug Localize.Plug.PutLocale
-  plug :put_session_when_chosen
+  plug Localize.Plug.PutSession, from: [:route, :path, :query, :body]
   plug :render
 
   defdelegate render(conn, options), to: ReferenceOrigin.Page
-  defdelegate put_session_when_chosen(conn, options), to: ReferenceOrigin.ChosenSession
 end
 
 defmodule ReferenceOrigin.ChosenPrivate do
@@ -188,62 +186,22 @@ defmodule ReferenceOrigin.ChosenPrivate do
   The two changes together: no cookie for a visitor who never chose, and
   the response that stores a choice kept out of shared caches.
 
+  The response is made private when the session is written, and not
+  whenever the locale came from a stored source. A locale in the path is
+  on every request for that page, and making all of those private kept
+  the page out of every cache when it was tried.
+
   """
 
   use Plug.Builder
 
   plug Localize.Plug.PutLocale
-  plug :put_session_when_chosen
+  plug Localize.Plug.PutSession, from: [:route, :path, :query, :body]
   plug :private_when_session_written
   plug :render
 
   defdelegate render(conn, options), to: ReferenceOrigin.Page
-  defdelegate put_session_when_chosen(conn, options), to: ReferenceOrigin.ChosenSession
 
   defdelegate private_when_session_written(conn, options),
     to: ReferenceOrigin.PrivateSession
-end
-
-defmodule ReferenceOrigin.ChosenSession do
-  @moduledoc """
-  Stores the resolved locale in the session only when the request named
-  a locale.
-
-  `Localize.Plug.PutLocale` does not say which source decided, so this
-  takes a `locale` parameter in the query or the path as the sign of a
-  choice. A request that names a locale the application does not support
-  is treated as a choice too, which a real implementation would not do.
-
-  """
-
-  @param "locale"
-
-  @doc """
-  Calls `Localize.Plug.PutSession` when the request named a locale.
-
-  ### Arguments
-
-  * `conn` is a `t:Plug.Conn.t/0` that `Localize.Plug.PutLocale` has
-    already been through, with its query parameters fetched.
-
-  * `options` is ignored.
-
-  ### Returns
-
-  * The `conn`, with the locale put in the session when the query or the
-    path held a `locale` parameter.
-
-  """
-  @spec put_session_when_chosen(Plug.Conn.t(), term()) :: Plug.Conn.t()
-  def put_session_when_chosen(conn, _options) do
-    if chosen?(conn) do
-      Localize.Plug.PutSession.call(conn, Localize.Plug.PutSession.init([]))
-    else
-      conn
-    end
-  end
-
-  defp chosen?(conn) do
-    Map.has_key?(conn.query_params, @param) or Map.has_key?(conn.path_params, @param)
-  end
 end
