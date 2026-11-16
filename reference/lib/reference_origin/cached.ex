@@ -14,6 +14,6 @@ defmodule ReferenceOrigin.Cached do
 
   use Plug.Builder
 
-  plug(PlugHTTPCache, %{store: :http_cache_store_memory})
-  plug(ReferenceOrigin.Router)
+  plug PlugHTTPCache, %{store: :http_cache_store_memory}
+  plug ReferenceOrigin.Router
 end

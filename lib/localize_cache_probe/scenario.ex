@@ -218,9 +218,9 @@ defmodule LocalizeCacheProbe.Scenario do
   end
 
   def run(:two_visitors, %Target{locales: [asked | _rest]} = target) do
-    with {:ok, steps} <- two_visitors(target.url, asked) do
+    with {:ok, cookies, steps} <- two_visitors(target.url, asked) do
       [second, third] = Enum.take(steps, -2)
-      {verdict, summary} = sharing_verdict(second.observation, third.observation)
+      {verdict, summary} = two_visitors_verdict(cookies, second.observation, third.observation)
 
       {:ok, result(:two_visitors, verdict, summary, steps)}
     end
@@ -259,15 +259,22 @@ defmodule LocalizeCacheProbe.Scenario do
   end
 
   def run(:first_visit, %Target{locales: [asked | _rest]} = target) do
+    # The third visitor's request is the control: a URL no cache has
+    # stored, so the cookie they are given comes from the application.
     with {:ok, first, primed} <- step(Visitor.new("A", accept_language: asked), target.url),
-         {:ok, second, served} <- step(Visitor.new("C", accept_language: asked), target.url) do
-      same_cookie? = map_size(first.cookies) > 0 and first.cookies == second.cookies
-      cached? = served.observation.cache_status == :hit
+         {:ok, second, served} <- step(Visitor.new("C", accept_language: asked), target.url),
+         {:ok, third, control} <-
+           step(Visitor.new("D", accept_language: asked), control_url(target.url)) do
+      facts = {
+        primed.observation.set_cookie?,
+        served.observation.cache_status == :hit,
+        cookies(first, second) == :same,
+        cookies(first, third) == :same
+      }
 
-      {verdict, summary} =
-        first_visit_verdict({primed.observation.set_cookie?, cached?, same_cookie?})
+      {verdict, summary} = first_visit_verdict(facts)
 
-      {:ok, result(:first_visit, verdict, summary, [primed, served])}
+      {:ok, result(:first_visit, verdict, summary, [primed, served, control])}
     end
   end
 
@@ -341,10 +348,26 @@ defmodule LocalizeCacheProbe.Scenario do
     first = Visitor.new("A", accept_language: accept_language)
     second = Visitor.new("C", accept_language: accept_language)
 
-    with {:ok, _first, primed} <- visits(first, url, 2, []),
-         {:ok, _second, served} <- visits(second, url, 3, []) do
-      {:ok, primed ++ served}
+    with {:ok, first, primed} <- visits(first, url, 2, []),
+         {:ok, second, served} <- visits(second, url, 3, []) do
+      {:ok, cookies(first, second), primed ++ served}
     end
+  end
+
+  # Whether two visitors can be told apart by the cookies they hold. Two
+  # who hold the same cookies, or none, send the same request, and a
+  # cache that serves both from one copy has shown nothing about cookies.
+  defp cookies(%Visitor{cookies: first}, %Visitor{cookies: second})
+       when map_size(first) == 0 and map_size(second) == 0 do
+    :none
+  end
+
+  defp cookies(%Visitor{cookies: cookies}, %Visitor{cookies: cookies}) do
+    :same
+  end
+
+  defp cookies(%Visitor{}, %Visitor{}) do
+    :different
   end
 
   # Two new visitors whose browsers ask for different locales, the first
@@ -385,12 +408,12 @@ defmodule LocalizeCacheProbe.Scenario do
   # The two-visitor requests against the page with a locale in its URL.
   # Both browsers ask for another locale, so the URL alone decides.
   defp url_locale(url, asked, locale) do
-    with {:ok, steps} <- two_visitors(url, asked) do
+    with {:ok, cookies, steps} <- two_visitors(url, asked) do
       [second, third] = Enum.take(steps, -2)
 
       {verdict, summary} =
         if language?(second.observation, locale) do
-          sharing_verdict(second.observation, third.observation)
+          qualify(sharing_verdict(second.observation, third.observation), cookies)
         else
           {:inconclusive, "The page with #{locale} in its URL was not served in #{locale}."}
         end
@@ -403,24 +426,62 @@ defmodule LocalizeCacheProbe.Scenario do
     result(name, :skipped, summary, [])
   end
 
+  # A page no request header decides is shared whatever cookies the two
+  # visitors hold, but only two who hold different ones show that the
+  # cache disregards a cookie.
+  defp qualify({:shared, _summary}, cookies) when cookies in [:none, :same] do
+    {:shared,
+     "A second visitor was served from the cache. The two hold the same cookies, so this " <>
+       "does not show the cache disregarding a cookie."}
+  end
+
+  defp qualify(outcome, _cookies) do
+    outcome
+  end
+
+  defp two_visitors_verdict(:different, other, own) do
+    sharing_verdict(other, own)
+  end
+
+  defp two_visitors_verdict(:none, _other, _own) do
+    {:skipped,
+     "Neither visitor was given a cookie, so the two send the same request and cannot be " <>
+       "told apart."}
+  end
+
+  defp two_visitors_verdict(:same, _other, _own) do
+    {:skipped,
+     "Both visitors hold the same cookie, so the two send the same request and cannot be " <>
+       "told apart. The first-visit scenario says whether the application or a cache gave " <>
+       "them the same one."}
+  end
+
   # Whether the first response set a cookie, whether the second visitor's
-  # response came from a cache, and whether both now hold the same cookies.
-  defp first_visit_verdict({false, _cached?, _same_cookie?}) do
+  # response came from a cache, whether the first two visitors hold the
+  # same cookies, and whether the application gave the third the same too.
+  defp first_visit_verdict({false, _cached?, _same?, _for_everyone?}) do
     {:skipped, "The first response a new visitor received set no cookie."}
   end
 
-  defp first_visit_verdict({true, true, true}) do
+  defp first_visit_verdict({true, true, true, false}) do
     {:shared_cookie,
      "A second new visitor was served the first visitor's response from the cache, cookie " <>
-       "included. If it is a session cookie, the two now share a session."}
+       "included, where the application gives each visitor a cookie of their own. If it is " <>
+       "a session cookie, the two now share a session."}
   end
 
-  defp first_visit_verdict({true, true, false}) do
+  defp first_visit_verdict({true, true, true, true}) do
+    {:reused,
+     "A second new visitor was served from the cache, with a cookie the application gives " <>
+       "every visitor alike."}
+  end
+
+  defp first_visit_verdict({true, true, false, _for_everyone?}) do
     {:reused,
      "A second new visitor was served from the cache, without the first visitor's cookie."}
   end
 
-  defp first_visit_verdict({true, false, _same_cookie?}) do
+  defp first_visit_verdict({true, false, _same?, _for_everyone?}) do
     {:not_reused,
      "A response that sets a cookie was not served from the cache to a second new visitor."}
   end

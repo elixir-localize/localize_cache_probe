@@ -6,10 +6,6 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 
 * [ ] **Run it through a hosted cache** — Cloudflare, Fastly, CloudFront, Google Cloud CDN, Azure Front Door and Akamai are known only from their documentation. Each needs the origin reachable from the internet and an account, which are Kip's to set up.
 
-* [ ] **Notice when two visitors hold the same cookie** — the reference origin's session holds only the locale, so every visitor with one locale gets an identical signed cookie. The two-visitor scenario then says "each with a cookie of their own" when they have one between them, and the shared-cookie verdict would fire without a replay. Compare the jars and say so.
-
-* [ ] **A configuration with a session value of the visitor's own** — add a path to the reference origin that puts a random token in the session, as a CSRF token does, so both kinds of cookie can be probed.
-
 * [ ] **A scenario for two `vary` lines** — the report says when `vary` arrived on more than one line, and a cache that reads only the first shows up as a wrong language in the first two scenarios. A scenario of its own needs an origin that is known to send two lines, which is the reference origin.
 
 * [ ] **Start each scenario from a clean cache** — an earlier scenario leaves pages in the cache that change what a later one finds. Behind Varnish and nginx with `vary: false`, the first scenario passes only because nothing is stored yet. A query parameter of its own for each scenario would separate them.
@@ -25,6 +21,8 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 * [ ] **Limit the body the client reads** — `LocalizeCacheProbe.HTTP.get/2` reads a whole response into memory; stop at a few megabytes.
 
 ## Done
+
+* [x] **Two visitors with the same cookie** — the two-visitor scenario is skipped when the visitors hold the same cookies or none, the first-visit scenario asks a third visitor whether the application gives everyone the same cookie before it calls one shared, and `/visitor/page` in the reference origin gives each visitor a cookie of their own. 2026-11-17.
 
 * [x] **Three caches in front of the reference origin** — `plug_http_cache` on port 4011, and Varnish and nginx in Docker; the probe's verdicts for all four configurations are in the README. 2026-11-17.
 

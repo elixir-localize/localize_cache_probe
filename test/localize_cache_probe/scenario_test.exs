@@ -241,11 +241,13 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         url_locale: :shared,
         first_visit: :not_reused
       ],
+      # This cache replays the cookie it stored with the first response, so
+      # both visitors end up holding it and cannot be told apart.
       ignores_vary: [
         other_language: :wrong_language,
         stored_locale: :wrong_language,
         same_visitor: :reused,
-        two_visitors: :shared,
+        two_visitors: :skipped,
         header_form: :shared,
         region: :wrong_language,
         url_locale: :shared,
@@ -323,35 +325,127 @@ defmodule LocalizeCacheProbe.ScenarioTest do
   end
 
   describe "the first-visit scenario" do
+    defp cookie(value, headers \\ []) do
+      page("fr", [{"Set-Cookie", "s=#{value}; path=/"} | headers])
+    end
+
+    test "makes a control request as a third new visitor" do
+      target = target([cookie("a"), cookie("b"), cookie("c")])
+
+      assert {:ok, result} = Scenario.run(:first_visit, target)
+      assert Enum.map(result.steps, & &1.visitor) == ["A", "C", "D"]
+
+      [first, second, control] = requests(result)
+
+      assert first =~ "GET /pricing HTTP/1.1"
+      assert second =~ "GET /pricing HTTP/1.1"
+      assert control =~ ~r{GET /pricing\?_probe=\d+ HTTP/1\.1}
+      refute Enum.any?([first, second, control], &(&1 =~ ~r/\r\ncookie:/i))
+    end
+
     test "is :skipped when the first response sets no cookie" do
-      assert {:ok, %{verdict: :skipped, steps: [_first, _second]}} =
-               Scenario.run(:first_visit, target([page("fr"), page("fr")]))
+      assert {:ok, %{verdict: :skipped}} =
+               Scenario.run(:first_visit, target([page("fr"), page("fr"), page("fr")]))
     end
 
     test "is :reused when the second visitor is served from the cache without the cookie" do
-      target = target([page("fr", [{"Set-Cookie", "s=a; path=/"}]), page("fr", [{"Age", "3"}])])
+      target = target([cookie("a"), page("fr", [{"Age", "3"}]), cookie("c")])
 
-      assert {:ok, %{verdict: :reused}} = Scenario.run(:first_visit, target)
+      assert {:ok, %{verdict: :reused, summary: summary}} = Scenario.run(:first_visit, target)
+      assert summary =~ "without the first visitor's cookie"
     end
 
-    test "is :shared_cookie when the cache replays the first visitor's cookie" do
-      stored = page("fr", [{"Set-Cookie", "s=a; path=/"}])
-      replayed = page("fr", [{"Set-Cookie", "s=a; path=/"}, {"Age", "3"}])
+    test "is :shared_cookie when the cache replays a cookie the application gives one visitor" do
+      target = target([cookie("a"), cookie("a", [{"Age", "3"}]), cookie("c")])
 
       assert {:ok, %{verdict: :shared_cookie, summary: summary}} =
-               Scenario.run(:first_visit, target([stored, replayed]))
+               Scenario.run(:first_visit, target)
 
       assert summary =~ "share a session"
     end
 
+    test "is :reused when the application gives every visitor the same cookie" do
+      target = target([cookie("a"), cookie("a", [{"Age", "3"}]), cookie("a")])
+
+      assert {:ok, %{verdict: :reused, summary: summary}} = Scenario.run(:first_visit, target)
+      assert summary =~ "every visitor alike"
+    end
+
     test "is :not_reused when each new visitor is given a cookie of their own" do
-      target =
-        target([
-          page("fr", [{"Set-Cookie", "s=a; path=/"}]),
-          page("fr", [{"Set-Cookie", "s=b; path=/"}])
-        ])
+      target = target([cookie("a"), cookie("b"), cookie("c")])
 
       assert {:ok, %{verdict: :not_reused}} = Scenario.run(:first_visit, target)
+    end
+  end
+
+  describe "the two-visitor scenario" do
+    test "is :skipped when both visitors hold the same cookie" do
+      hit = page("fr", [{"X-Cache", "HIT"}])
+      same = page("fr", [{"Set-Cookie", "s=fr; path=/"}])
+
+      assert {:ok, %{verdict: :skipped, summary: summary, steps: steps}} =
+               Scenario.run(:two_visitors, target([same, hit, same, hit, hit]))
+
+      assert summary =~ "Both visitors hold the same cookie"
+      assert length(steps) == 5
+    end
+
+    test "is :skipped when neither visitor is given a cookie" do
+      hit = page("fr", [{"X-Cache", "HIT"}])
+
+      assert {:ok, %{verdict: :skipped, summary: summary}} =
+               Scenario.run(:two_visitors, target(List.duplicate(hit, 5)))
+
+      assert summary =~ "Neither visitor was given a cookie"
+    end
+
+    test "judges the cache when the two hold different cookies" do
+      hit = page("fr", [{"X-Cache", "HIT"}])
+      miss = page("fr", [{"X-Cache", "MISS"}])
+      first = page("fr", [{"Set-Cookie", "s=1; path=/"}])
+      second = page("fr", [{"Set-Cookie", "s=2; path=/"}])
+
+      assert {:ok, %{verdict: :shared, summary: summary}} =
+               Scenario.run(:two_visitors, target([first, miss, second, hit, hit]))
+
+      assert summary =~ "with a cookie of their own"
+
+      assert {:ok, %{verdict: :not_shared}} =
+               Scenario.run(:two_visitors, target([first, miss, second, miss, hit]))
+    end
+  end
+
+  describe "the url-locale scenario" do
+    defp localized_target(responses) do
+      url = TestOrigin.start(responses)
+
+      {:ok, target} =
+        Target.new(url <> "/pricing",
+          locales: ["fr", "de"],
+          localized_url: url <> "/{locale}/pricing"
+        )
+
+      target
+    end
+
+    test "says so when a shared page was shared by two visitors with the same cookies" do
+      hit = page("de", [{"X-Cache", "HIT"}])
+
+      assert {:ok, %{verdict: :shared, summary: summary}} =
+               Scenario.run(:url_locale, localized_target(List.duplicate(hit, 5)))
+
+      assert summary =~ "The two hold the same cookies"
+    end
+
+    test "is plainly :shared when the two hold different cookies" do
+      hit = page("de", [{"X-Cache", "HIT"}])
+      first = page("de", [{"Set-Cookie", "s=1; path=/"}])
+      second = page("de", [{"Set-Cookie", "s=2; path=/"}])
+
+      assert {:ok, %{verdict: :shared, summary: summary}} =
+               Scenario.run(:url_locale, localized_target([first, hit, second, hit, hit]))
+
+      assert summary =~ "with a cookie of their own"
     end
   end
 

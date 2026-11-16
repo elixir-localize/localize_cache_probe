@@ -52,11 +52,11 @@ The task exits with status 1 when a visitor is served the wrong language from a 
 | Two visitors whose browsers ask for different locales | Whether the cache takes account of `accept-language`. |
 | A visitor with a stored locale, after another visitor's page is cached | Whether the cache takes account of the cookie. |
 | One visitor, three requests | What a developer sees checking a cache in one browser. |
-| Two visitors who ask for the same locale, each with a cookie of their own | Whether the cache serves both from one copy or keeps one for each. |
+| Two visitors who ask for the same locale, each with a cookie of their own | Whether the cache serves both from one copy or keeps one for each. Skipped when the two hold the same cookies. |
 | One visitor, two forms of the same `accept-language` | Whether each form of the header gets a copy of its own. |
 | Two visitors whose browsers ask for different regions of one language | Whether the cache folds a region into its language. Needs `--regions`. |
 | Two visitors at the page with a locale in its URL | Whether a page that no request header decides is shared. Needs `--localized-url`. |
-| Two new visitors, when the first response sets a cookie | Whether the cache stores that response, and hands the cookie to someone else. |
+| Two new visitors, when the first response sets a cookie | Whether the cache stores that response, and hands one visitor's cookie to another. A cookie the application gives every visitor alike does not count. |
 
 The three scenarios that judge the language make a control request: the same kind of visitor asks for the page at a URL with a `_probe` parameter no request has carried before, so no cache has it stored and the application answers. Where the application serves that visitor one language and the page reaches them in another, the verdict is a wrong language, whether or not anything says it is a cache. Where the application itself does not serve the expected language, the scenario is skipped: an application with no session does not store a choice, and there is nothing for a cache to get wrong.
 
@@ -74,6 +74,7 @@ Each scenario starts from whatever the cache already holds, so an earlier scenar
 | `/no-session/page` | The session left out of `:from`, and no `PutSession`. |
 | `/vary-off/page` | The default sources with `vary: false`. |
 | `/two-vary/page` | The default configuration behind a plug that sets a `vary` line first. |
+| `/visitor/page` | The default configuration, with a value of the visitor's own in the session. |
 
 Each also answers with a locale in the path, such as `/default/de/page`.
 
@@ -108,34 +109,36 @@ The first two start with the origin. For the other two, with Docker running:
 docker compose -f reference/caches/compose.yaml up -d
 ```
 
-The origin's session holds nothing but the locale, so its signed cookie is the same for every visitor with the same locale. An application whose session also holds something of the visitor's own, such as a CSRF token, sends each visitor a different cookie.
+In every configuration but one the session holds nothing but the locale, so its signed cookie is the same for every visitor with the same locale. `/visitor/page` adds a value of the visitor's own, so that each visitor's cookie differs, as it does in an application whose session holds a CSRF token or a user id.
 
 ### Results
 
 Run on 2026-11-17 with `localize_web` 1.4.0 before its release, Bandit 1.14.1, `plug_http_cache` 1.0.0 on `http_cache` 1.0.0, Varnish 7.6 and nginx 1.27.5. Each cell is the verdict behind `plug_http_cache`, Varnish and nginx in that order, or one verdict where all three agree.
 
-| Scenario | `/default` | `/no-session` | `/vary-off` | `/two-vary` |
-|---|---|---|---|---|
-| Different locales | correct | correct | wrong, correct, correct | correct |
-| Stored locale | correct | skipped | wrong language | correct |
-| One visitor | reused | reused | reused | reused |
-| Two visitors | shared | shared | shared | shared |
-| Two header forms | not shared, shared, shared | not shared | shared | not shared, shared, shared |
-| Two regions | correct | correct | wrong language | correct |
-| Locale in the URL | shared | shared | shared | shared |
-| First visit | skipped, not reused, not reused | skipped | skipped | skipped, not reused, not reused |
+| Scenario | `/default` | `/visitor` | `/no-session` | `/vary-off` | `/two-vary` |
+|---|---|---|---|---|---|
+| Different locales | correct | correct | correct | wrong, correct, correct | correct |
+| Stored locale | correct | correct | skipped | wrong language | correct |
+| One visitor | reused | reused | reused | reused | reused |
+| Two visitors | skipped | skipped, not shared, not shared | skipped | skipped | skipped |
+| Two header forms | not shared, shared, shared | not shared, shared, shared | not shared | shared | not shared, shared, shared |
+| Two regions | correct | correct | correct | wrong language | correct |
+| Locale in the URL | shared | shared | shared | shared | shared |
+| First visit | skipped, not reused, not reused | skipped, not reused, not reused | skipped | skipped | skipped, not reused, not reused |
 
 What the table shows:
 
-* **The default configuration is correct behind all three caches.** No visitor was served another's language.
+* **The default configuration is correct behind all three caches.** No visitor was served another's language, with or without a value of the visitor's own in the session.
 
 * **`vary: false` with the session still read serves the wrong language behind all three.** This is the configuration the `localize_web` documentation warns about.
 
 * **All three caches combine two `vary` lines.** Bandit adds `vary: accept-encoding` on a line of its own, so every response from the origin carries two, and `/default` and `/two-vary` give the same verdicts.
 
-* **Varnish and nginx never store a response that sets a cookie; `http_cache` stores it and leaves the cookie out when it serves it.** That is why `vary: false` fails on a first visit only behind `plug_http_cache`, and why a new visitor served from its cache is given no session cookie.
+* **A cookie of the visitor's own costs a copy for each visitor behind Varnish and nginx.** That is "Two visitors: not shared" under `/visitor`. Where the cookie holds only the locale the two visitors hold the same one, cannot be told apart, and the scenario is skipped.
 
-* **"Two visitors: shared" is the origin's identical cookie, not a cache ignoring `vary: cookie`.** Both visitors hold the same signed cookie, so they send the same request.
+* **Varnish and nginx never store a response that sets a cookie; `http_cache` stores it and leaves the cookie out when it serves it.** Behind `plug_http_cache` a new visitor is served that stored copy and is given no session cookie, which is why the two-visitor and first-visit scenarios are skipped there and why `vary: false` fails on a first visit only there.
+
+* **A page with the locale in its URL is shared by every visitor behind every cache.**
 
 * **With no session, each form of `accept-language` gets a copy of its own.** That is the fragmentation a cache avoids by normalising the header.
 
