@@ -144,12 +144,12 @@ defmodule ReferenceOrigin.PrivateSession do
 
   defdelegate render(conn, options), to: ReferenceOrigin.Page
 
-  # `Plug.Conn.put_session/3` records that the session is to be written
-  # under this key, which `Plug.Session` reads when the response is
-  # sent. Plug has no public function that says the same.
+  # `Localize.Plug.PutSession.stored?/1` says whether the plug wrote the
+  # locale to the session for this request, which is when the response
+  # sets the session cookie.
   @doc false
   def private_when_session_written(conn, _options) do
-    if conn.private[:plug_session_info] == :write do
+    if Localize.Plug.PutSession.stored?(conn) do
       Plug.Conn.assign(conn, :cache_control, "private")
     else
       conn

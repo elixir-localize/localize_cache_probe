@@ -169,7 +169,7 @@ Three configurations try changes that came out of these results. `/private-sessi
 
 * **Both together are correct behind all three caches and lose no choice.**
 
-* **Make a response private when the session is written, not whenever the locale came from the URL.** A first version of `/chosen-private` sent `private` for any request whose locale came from a stored source. A locale in the path is on every request for that page, so the page with the locale in its URL was never stored: "Locale in the URL: not cached" behind all three.
+* **Make a response private when the session is written, not whenever the locale came from the URL.** A first version of `/chosen-private` sent `private` for any request whose locale came from a stored source. A locale in the path is on every request for that page, so the page with the locale in its URL was never stored: "Locale in the URL: not cached" behind all three. `Localize.Plug.PutSession.stored?/1`, also new in 1.4.0, says when the plug wrote the session, and both configurations now use it.
 
 ## Recognising the cache
 
