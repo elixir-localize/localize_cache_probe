@@ -7,7 +7,8 @@ defmodule ReferenceOrigin.Page do
   `content-language` header and in the `lang` of the `html` element, and
   makes the response storable by a shared cache with
   `cache-control: public`. Without that, Plug's default keeps every
-  response private and there is nothing for a cache to get wrong.
+  response private and there is nothing for a cache to get wrong. A
+  configuration that wants another value assigns it as `:cache_control`.
 
   """
 
@@ -35,7 +36,7 @@ defmodule ReferenceOrigin.Page do
     locale = locale(Localize.Plug.PutLocale.get_locale(conn))
 
     conn
-    |> put_resp_header("cache-control", @cache_control)
+    |> put_resp_header("cache-control", conn.assigns[:cache_control] || @cache_control)
     |> put_resp_header("content-language", locale)
     |> put_resp_content_type("text/html")
     |> send_resp(200, body(locale, conn.request_path))

@@ -20,6 +20,10 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 
 ## Done
 
+* [x] **Storing only a chosen locale, tried** — `/chosen/page` and `/chosen-private/page` in the reference origin; two new visitors then share a copy behind every cache, at the cost of a copy for each form of `accept-language`. The first-visit scenario now reports that reuse when no cookie is set. 2026-11-17.
+
+* [x] **`cache-control: private` when the session is written** — `/private-session/page` in the reference origin; behind `plug_http_cache` the second visitor's choice is then stored and every verdict matches Varnish and nginx. 2026-11-17.
+
 * [x] **A scenario for a second visitor's choice** — `:second_choice` has two visitors choose through one URL and checks each with a control request; the verdict `choice lost` exits with status 1. The stored-locale check now uses a choose URL of its own, so an earlier scenario cannot leave it in the cache. 2026-11-17.
 
 * [x] **A scenario for several `vary` lines** — `:vary_lines` repeats the checks on `accept-language` and the cookie and reports each against the line that named it; `Observation` keeps the members of each line apart. 2026-11-17.

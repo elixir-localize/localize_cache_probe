@@ -38,8 +38,9 @@ defmodule LocalizeCacheProbe.Scenario do
     unless the target has a localized URL.
 
   * `:first_visit` — two new visitors, neither with a cookie. It shows
-    whether the cache stores a response that sets a cookie, and whether
-    it then hands that cookie to someone else.
+    whether the cache serves the second from the copy made for the first,
+    and where the first response sets a cookie, whether the cache then
+    hands that cookie to someone else.
 
   * `:vary_lines` — a response may carry its `vary` on several header
     lines, and a cache has to read them all. The scenario repeats the
@@ -80,7 +81,7 @@ defmodule LocalizeCacheProbe.Scenario do
     header_form: "One visitor, two forms of the same accept-language",
     region: "Two visitors whose browsers ask for different regions of one language",
     url_locale: "Two visitors at the page with a locale in its URL",
-    first_visit: "Two new visitors, when the first response sets a cookie",
+    first_visit: "Two new visitors, neither with a cookie",
     vary_lines: "A response whose vary is on more than one line",
     second_choice: "Two visitors who choose a locale through the same URL"
   }
@@ -633,7 +634,12 @@ defmodule LocalizeCacheProbe.Scenario do
   # Whether the first response set a cookie, whether the second visitor's
   # response came from a cache, whether the first two visitors hold the
   # same cookies, and whether the application gave the third the same too.
-  defp first_visit_verdict({false, _cached?, _same?, _for_everyone?}) do
+  defp first_visit_verdict({false, true, _same?, _for_everyone?}) do
+    {:reused,
+     "The first response set no cookie, and a second new visitor was served from the cache."}
+  end
+
+  defp first_visit_verdict({false, false, _same?, _for_everyone?}) do
     {:skipped, "The first response a new visitor received set no cookie."}
   end
 

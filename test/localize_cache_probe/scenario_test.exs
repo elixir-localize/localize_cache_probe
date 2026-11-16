@@ -354,6 +354,13 @@ defmodule LocalizeCacheProbe.ScenarioTest do
                Scenario.run(:first_visit, target([page("fr"), page("fr"), page("fr")]))
     end
 
+    test "is :reused when no cookie is set and the second visitor is served from the cache" do
+      target = target([page("fr"), page("fr", [{"Age", "2"}]), page("fr")])
+
+      assert {:ok, %{verdict: :reused, summary: summary}} = Scenario.run(:first_visit, target)
+      assert summary =~ "set no cookie, and a second new visitor was served from the cache"
+    end
+
     test "is :reused when the second visitor is served from the cache without the cookie" do
       target = target([cookie("a"), page("fr", [{"Age", "3"}]), cookie("c")])
 

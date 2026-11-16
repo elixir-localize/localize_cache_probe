@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Cache.ProbeTest do
 
     assert report =~ "/pricing?locale=de"
     assert report =~ "Verdict: not shared"
-    assert report =~ "8. Two new visitors, when the first response sets a cookie"
+    assert report =~ "8. Two new visitors, neither with a cookie"
 
     assert report =~
              "6. Two visitors whose browsers ask for different regions of one language\n" <>

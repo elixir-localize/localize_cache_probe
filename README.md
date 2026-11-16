@@ -56,7 +56,7 @@ The task exits with status 1 when a visitor is served the wrong language from a 
 | One visitor, two forms of the same `accept-language` | Whether each form of the header gets a copy of its own. |
 | Two visitors whose browsers ask for different regions of one language | Whether the cache folds a region into its language. Needs `--regions`. |
 | Two visitors at the page with a locale in its URL | Whether a page that no request header decides is shared. Needs `--localized-url`. |
-| Two new visitors, when the first response sets a cookie | Whether the cache stores that response, and hands one visitor's cookie to another. A cookie the application gives every visitor alike does not count. |
+| Two new visitors, neither with a cookie | Whether the second is served the copy made for the first, and where the first response sets a cookie, whether the cache hands that cookie on. A cookie the application gives every visitor alike does not count. |
 | A response whose `vary` is on more than one line | Whether the cache reads every line. It repeats the checks on `accept-language` and the cookie and reports each against the line that named it. Skipped when no response arrives with them among two or more lines. |
 | Two visitors who choose a locale through the same URL | Whether the page that stores a choice is itself stored, so that the second visitor's choice never reaches the application. |
 
@@ -77,6 +77,9 @@ Each scenario starts from whatever the cache already holds, so an earlier scenar
 | `/vary-off/page` | The default sources with `vary: false`. |
 | `/two-vary/page` | The default configuration behind a plug that sets a `vary` line first. |
 | `/visitor/page` | The default configuration, with a value of the visitor's own in the session. |
+| `/private-session/page` | The default configuration, with `cache-control: private` on a response that writes the session. |
+| `/chosen/page` | The default sources, storing the locale only when the request named one. |
+| `/chosen-private/page` | `/chosen/page` and `/private-session/page` together. |
 
 Each also answers with a locale in the path, such as `/default/de/page`.
 
@@ -126,27 +129,45 @@ Run on 2026-11-17 with `localize_web` 1.4.0 before its release, Bandit 1.14.1, `
 | Two header forms | not shared, shared, shared | not shared, shared, shared | not shared | shared | not shared, shared, shared |
 | Two regions | correct | correct | correct | wrong language | correct |
 | Locale in the URL | shared | shared | shared | shared | shared |
-| First visit | skipped, not reused, not reused | skipped, not reused, not reused | skipped | skipped | skipped, not reused, not reused |
+| First visit | reused, not reused, not reused | reused, not reused, not reused | reused | reused | reused, not reused, not reused |
 | Several `vary` lines | correct, skipped, correct | correct, skipped, correct | correct, skipped, correct | skipped | correct, skipped, correct |
 | Second choice | lost, correct, correct | lost, correct, correct | skipped | lost, correct, correct | lost, correct, correct |
 
 What the table shows:
 
-* **The default configuration is correct behind all three caches.** No visitor was served another's language, with or without a value of the visitor's own in the session.
+* **The default configuration serves every visitor the right language behind all three caches**, with or without a value of the visitor's own in the session.
 
 * **`vary: false` with the session still read serves the wrong language behind all three.** This is the configuration the `localize_web` documentation warns about.
 
 * **`plug_http_cache` and nginx honour a field whichever `vary` line names it.** Bandit adds `vary: accept-encoding` on a line of its own, so every response from the origin carries two. `accept-language` and the cookie are on the second line under `/default` and on the first under `/two-vary`, and both were honoured in both places. Varnish joins the lines into one before it sends the response on, so the scenario has nothing to read there and is skipped; the other scenarios show Varnish honouring the fields.
 
-* **Behind `plug_http_cache` a second visitor who chooses a locale is not remembered.** The page that stores the choice is itself stored, and `http_cache` serves it to the next visitor without the cookie. They are shown the page in the locale they chose, once, and their next page is back in their browser's language. Varnish and nginx do not store a response that sets a cookie, so each visitor's choice reaches the application. Keeping a response that sets the session out of the cache, with `cache-control: private`, should avoid it; that has not been tried here.
-
 * **A cookie of the visitor's own costs a copy for each visitor behind Varnish and nginx.** That is "Two visitors: not shared" under `/visitor`. Where the cookie holds only the locale the two visitors hold the same one, cannot be told apart, and the scenario is skipped.
 
-* **Varnish and nginx never store a response that sets a cookie; `http_cache` stores it and leaves the cookie out when it serves it.** Behind `plug_http_cache` a new visitor is served that stored copy and is given no session cookie, which is why the two-visitor and first-visit scenarios are skipped there and why `vary: false` fails on a first visit only there.
+* **Varnish and nginx never store a response that sets a cookie; `http_cache` stores it and leaves the cookie out when it serves it.** That is "First visit: reused, not reused, not reused" under `/default`. Behind `plug_http_cache` a new visitor is served the stored copy and is given no session cookie.
+
+* **Behind `plug_http_cache` a second visitor who chooses a locale is not remembered.** The page that stores the choice is itself stored, and the next visitor to choose is served it without the cookie. They are shown the page in the locale they chose, once, and their next page is back in their browser's language.
 
 * **A page with the locale in its URL is shared by every visitor behind every cache.**
 
 * **With no session, each form of `accept-language` gets a copy of its own.** That is the fragmentation a cache avoids by normalising the header.
+
+### Two changes, tried
+
+Two configurations try changes that have been discussed and are not in `localize_web`. `/private-session` sends `cache-control: private` on a response that writes the session. `/chosen` stores the locale only when the request named one, so a visitor who never chose is given no cookie. `/chosen-private` does both. Every scenario not listed gave the same verdict as `/default`.
+
+| Scenario | `/default` | `/private-session` | `/chosen` | `/chosen-private` |
+|---|---|---|---|---|
+| Two header forms | not shared, shared, shared | shared | not shared | not shared |
+| First visit | reused, not reused, not reused | not reused | reused | reused |
+| Second choice | lost, correct, correct | correct | lost, correct, correct | correct |
+
+* **`cache-control: private` on a response that writes the session stops a choice being lost.** With it, `plug_http_cache` gives the same verdicts as Varnish and nginx. Behind those two it changes nothing, since neither stored such a response to begin with.
+
+* **Storing only a chosen locale lets two new visitors share a copy behind every cache.** Under `/default` the first response sets a cookie, and Varnish and nginx do not store it. Under `/chosen` it sets none, and the second new visitor is served the copy made for the first.
+
+* **It has a cost: each form of `accept-language` gets a copy of its own.** Under `/default` the session decides after the first visit, so the header no longer matters. Under `/chosen` the header goes on deciding for a visitor who never chose, and a cache that does not normalise it stores one copy for each way a browser writes it.
+
+* **Both together are correct behind all three caches and lose no choice.**
 
 ## Recognising the cache
 

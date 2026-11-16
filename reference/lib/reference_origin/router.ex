@@ -10,6 +10,9 @@ defmodule ReferenceOrigin.Router do
   | `/vary-off/page` | `ReferenceOrigin.VaryOff` |
   | `/two-vary/page` | `ReferenceOrigin.TwoVary` |
   | `/visitor/page` | `ReferenceOrigin.Visitor` |
+  | `/private-session/page` | `ReferenceOrigin.PrivateSession` |
+  | `/chosen/page` | `ReferenceOrigin.Chosen` |
+  | `/chosen-private/page` | `ReferenceOrigin.ChosenPrivate` |
 
   Each also answers with a locale in the path, such as
   `/default/de/page`, which `Localize.Plug.PutLocale` reads through its
@@ -52,6 +55,15 @@ defmodule ReferenceOrigin.Router do
 
   get "/visitor/page", to: ReferenceOrigin.Visitor
   get "/visitor/:locale/page", to: ReferenceOrigin.Visitor
+
+  get "/private-session/page", to: ReferenceOrigin.PrivateSession
+  get "/private-session/:locale/page", to: ReferenceOrigin.PrivateSession
+
+  get "/chosen/page", to: ReferenceOrigin.Chosen
+  get "/chosen/:locale/page", to: ReferenceOrigin.Chosen
+
+  get "/chosen-private/page", to: ReferenceOrigin.ChosenPrivate
+  get "/chosen-private/:locale/page", to: ReferenceOrigin.ChosenPrivate
 
   match _ do
     send_resp(conn, 404, "not found")
