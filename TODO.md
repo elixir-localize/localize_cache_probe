@@ -6,8 +6,6 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 
 * [ ] **Run it through a hosted cache** — Cloudflare, Fastly, CloudFront, Google Cloud CDN, Azure Front Door and Akamai are known only from their documentation. Each needs the origin reachable from the internet and an account, which are Kip's to set up.
 
-* [ ] **A scenario for a second visitor's choice** — behind `plug_http_cache` the page that stores a chosen locale is itself stored and served to the next visitor without the cookie, so their choice is lost. Today that shows only as a skipped stored-locale check. Have two visitors choose through the same URL and check each with a control request.
-
 * [ ] **Start each scenario from a clean cache** — an earlier scenario leaves pages in the cache that change what a later one finds. Behind Varnish and nginx with `vary: false`, the first scenario passes only because nothing is stored yet. A query parameter of its own for each scenario would separate them.
 
 * [ ] **Tests for the reference origin** — it has none; its behaviour is checked only by running the probe against it.
@@ -21,6 +19,8 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 * [ ] **Limit the body the client reads** — `LocalizeCacheProbe.HTTP.get/2` reads a whole response into memory; stop at a few megabytes.
 
 ## Done
+
+* [x] **A scenario for a second visitor's choice** — `:second_choice` has two visitors choose through one URL and checks each with a control request; the verdict `choice lost` exits with status 1. The stored-locale check now uses a choose URL of its own, so an earlier scenario cannot leave it in the cache. 2026-11-17.
 
 * [x] **A scenario for several `vary` lines** — `:vary_lines` repeats the checks on `accept-language` and the cookie and reports each against the line that named it; `Observation` keeps the members of each line apart. 2026-11-17.
 

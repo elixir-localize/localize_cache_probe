@@ -6,7 +6,7 @@ It grew out of [localize_web issue 28](https://github.com/elixir-localize/locali
 
 ## Status
 
-The probe runs nine scenarios against a page and prints a report. It has been run against the reference origin in `reference/` behind `plug_http_cache`, Varnish and nginx, and the results are below. It has not been run against a hosted cache or against an application of any size.
+The probe runs ten scenarios against a page and prints a report. It has been run against the reference origin in `reference/` behind `plug_http_cache`, Varnish and nginx, and the results are below. It has not been run against a hosted cache or against an application of any size.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ mix cache.probe https://example.com/pricing --locales fr,de --regions fr-FR,fr-C
 
 `--regions` names two regional locales of one language that the application serves differently. `--localized-url` is a template for the same page with the locale in its URL.
 
-The probe sends about 40 `GET` requests, and the cache in front of the application may store what comes back.
+The probe sends about 45 `GET` requests, and the cache in front of the application may store what comes back.
 
 The report names the cache, gives what its vendor documents about `vary` where that has been read, and lists each scenario with a verdict and the requests made. This one is the reference origin's `vary: false` configuration behind Varnish:
 
@@ -43,7 +43,7 @@ The report names the cache, gives what its vendor documents about `vary` where t
    B        fr        /vary-off/page                          200     fr        accept-encoding  hit
 ```
 
-The task exits with status 1 when a visitor is served the wrong language from a cache, or the cookie stored with another visitor's response, so it can gate a deployment.
+The task exits with status 1 when a visitor is served the wrong language from a cache, or the cookie stored with another visitor's response, or when a visitor's choice of locale is lost to a cache, so it can gate a deployment.
 
 ## Scenarios
 
@@ -58,6 +58,7 @@ The task exits with status 1 when a visitor is served the wrong language from a 
 | Two visitors at the page with a locale in its URL | Whether a page that no request header decides is shared. Needs `--localized-url`. |
 | Two new visitors, when the first response sets a cookie | Whether the cache stores that response, and hands one visitor's cookie to another. A cookie the application gives every visitor alike does not count. |
 | A response whose `vary` is on more than one line | Whether the cache reads every line. It repeats the checks on `accept-language` and the cookie and reports each against the line that named it. Skipped when no response arrives with them among two or more lines. |
+| Two visitors who choose a locale through the same URL | Whether the page that stores a choice is itself stored, so that the second visitor's choice never reaches the application. |
 
 The three scenarios that judge the language make a control request: the same kind of visitor asks for the page at a URL with a `_probe` parameter no request has carried before, so no cache has it stored and the application answers. Where the application serves that visitor one language and the page reaches them in another, the verdict is a wrong language, whether or not anything says it is a cache. Where the application itself does not serve the expected language, the scenario is skipped: an application with no session does not store a choice, and there is nothing for a cache to get wrong.
 
@@ -127,6 +128,7 @@ Run on 2026-11-17 with `localize_web` 1.4.0 before its release, Bandit 1.14.1, `
 | Locale in the URL | shared | shared | shared | shared | shared |
 | First visit | skipped, not reused, not reused | skipped, not reused, not reused | skipped | skipped | skipped, not reused, not reused |
 | Several `vary` lines | correct, skipped, correct | correct, skipped, correct | correct, skipped, correct | skipped | correct, skipped, correct |
+| Second choice | lost, correct, correct | lost, correct, correct | skipped | lost, correct, correct | lost, correct, correct |
 
 What the table shows:
 
@@ -136,7 +138,7 @@ What the table shows:
 
 * **`plug_http_cache` and nginx honour a field whichever `vary` line names it.** Bandit adds `vary: accept-encoding` on a line of its own, so every response from the origin carries two. `accept-language` and the cookie are on the second line under `/default` and on the first under `/two-vary`, and both were honoured in both places. Varnish joins the lines into one before it sends the response on, so the scenario has nothing to read there and is skipped; the other scenarios show Varnish honouring the fields.
 
-* **Behind `plug_http_cache` a second visitor who chooses a locale is not remembered.** The page that stores the choice is itself stored, and `http_cache` serves it to the next visitor without the cookie. That is why the scenario above could test `accept-language` there and not the cookie. Varnish and nginx do not store a response that sets a cookie, so each visitor's choice reaches the application.
+* **Behind `plug_http_cache` a second visitor who chooses a locale is not remembered.** The page that stores the choice is itself stored, and `http_cache` serves it to the next visitor without the cookie. They are shown the page in the locale they chose, once, and their next page is back in their browser's language. Varnish and nginx do not store a response that sets a cookie, so each visitor's choice reaches the application. Keeping a response that sets the session out of the cache, with `cache-control: private`, should avoid it; that has not been tried here.
 
 * **A cookie of the visitor's own costs a copy for each visitor behind Varnish and nginx.** That is "Two visitors: not shared" under `/visitor`. Where the cookie holds only the locale the two visitors hold the same one, cannot be told apart, and the scenario is skipped.
 

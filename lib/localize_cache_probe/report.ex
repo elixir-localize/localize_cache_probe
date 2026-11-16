@@ -16,8 +16,8 @@ defmodule LocalizeCacheProbe.Report do
   alias LocalizeCacheProbe.Scenario
   alias LocalizeCacheProbe.Target
 
-  # The two verdicts that mean a visitor was served something that
-  # belongs to someone else are in capitals.
+  # The verdicts that mean a visitor was failed are in capitals: they were
+  # served something that belongs to someone else, or their choice was lost.
   @verdicts %{
     correct: "correct",
     wrong_language: "WRONG LANGUAGE",
@@ -27,6 +27,7 @@ defmodule LocalizeCacheProbe.Report do
     shared: "shared",
     not_shared: "not shared",
     shared_cookie: "SHARED COOKIE",
+    choice_lost: "CHOICE LOST",
     skipped: "skipped",
     inconclusive: "inconclusive"
   }

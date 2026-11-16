@@ -90,12 +90,25 @@ defmodule LocalizeCacheProbe.ReportTest do
     assert Report.format(target, [result]) =~ "accept-language, accept-encoding (2 lines)"
   end
 
-  test "prints a skipped scenario with no table, and the two serious verdicts in capitals" do
+  test "prints a skipped scenario with no table, and the serious verdicts in capitals" do
     {:ok, target} = Target.new("https://example.com/", locales: ["fr", "de"])
 
     results = [
       %{name: :region, title: "Regions", verdict: :skipped, summary: "Give two.", steps: []},
-      %{name: :first_visit, title: "Cookies", verdict: :shared_cookie, summary: "Bad.", steps: []}
+      %{
+        name: :first_visit,
+        title: "Cookies",
+        verdict: :shared_cookie,
+        summary: "Bad.",
+        steps: []
+      },
+      %{
+        name: :second_choice,
+        title: "Choices",
+        verdict: :choice_lost,
+        summary: "Lost.",
+        steps: []
+      }
     ]
 
     assert Report.format(target, results) ==
@@ -111,6 +124,10 @@ defmodule LocalizeCacheProbe.ReportTest do
              2. Cookies
                 Verdict: SHARED COOKIE
                 Bad.
+
+             3. Choices
+                Verdict: CHOICE LOST
+                Lost.
              """)
   end
 end

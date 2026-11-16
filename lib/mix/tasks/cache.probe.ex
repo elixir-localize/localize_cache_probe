@@ -8,12 +8,13 @@ defmodule Mix.Tasks.Cache.Probe do
       mix cache.probe https://example.com/pricing --locales fr,de
 
   The page is one whose URL holds no locale. Run it only against an
-  application you operate: it sends about 40 `GET` requests, and the
+  application you operate: it sends about 45 `GET` requests, and the
   cache in front of the application may store what comes back.
 
   The task exits with status 1 when a visitor is served the wrong
   language from a cache, or the cookie stored with another visitor's
-  response, so it can gate a deployment.
+  response, or when a visitor's choice of locale is lost to a cache, so
+  it can gate a deployment.
 
   ### Options
 
@@ -55,8 +56,9 @@ defmodule Mix.Tasks.Cache.Probe do
   @usage "Usage: mix cache.probe URL --locales fr,de [--param locale] [--choose-url TEMPLATE] " <>
            "[--regions fr-FR,fr-CH] [--localized-url TEMPLATE]"
 
-  # A visitor was served something that belongs to someone else.
-  @failures [:wrong_language, :shared_cookie]
+  # A visitor was served something that belongs to someone else, or their
+  # choice of locale never reached the application.
+  @failures [:wrong_language, :shared_cookie, :choice_lost]
 
   @impl Mix.Task
   def run(arguments) do

@@ -48,6 +48,11 @@ defmodule LocalizeCacheProbe.Scenario do
     reaches the probe with one of those fields among two or more lines,
     which a cache that joins the lines prevents.
 
+  * `:second_choice` — two visitors choose a locale through the same
+    URL, one after the other. A cache that stores the page which stores
+    a choice serves it to the second visitor, and if it leaves the
+    cookie out, as it should, their choice is never stored.
+
   """
 
   alias LocalizeCacheProbe.Observation
@@ -63,7 +68,8 @@ defmodule LocalizeCacheProbe.Scenario do
     :region,
     :url_locale,
     :first_visit,
-    :vary_lines
+    :vary_lines,
+    :second_choice
   ]
 
   @titles %{
@@ -75,7 +81,8 @@ defmodule LocalizeCacheProbe.Scenario do
     region: "Two visitors whose browsers ask for different regions of one language",
     url_locale: "Two visitors at the page with a locale in its URL",
     first_visit: "Two new visitors, when the first response sets a cookie",
-    vary_lines: "A response whose vary is on more than one line"
+    vary_lines: "A response whose vary is on more than one line",
+    second_choice: "Two visitors who choose a locale through the same URL"
   }
 
   # A response with any of these may not be reused from a shared cache.
@@ -111,6 +118,9 @@ defmodule LocalizeCacheProbe.Scenario do
   * `:shared_cookie` — a cache gave one new visitor the cookie it had
     stored with another's response.
 
+  * `:choice_lost` — a visitor chose a locale and the application was
+    never told, because a cache answered in its place.
+
   * `:skipped` — the scenario was not run, or had nothing to test.
 
   * `:inconclusive` — the responses do not settle the question.
@@ -125,6 +135,7 @@ defmodule LocalizeCacheProbe.Scenario do
           | :shared
           | :not_shared
           | :shared_cookie
+          | :choice_lost
           | :skipped
           | :inconclusive
 
@@ -257,7 +268,7 @@ defmodule LocalizeCacheProbe.Scenario do
     with {:ok, first, primed} <- step(Visitor.new("A", accept_language: asked), target.url),
          {:ok, second, served} <- step(Visitor.new("C", accept_language: asked), target.url),
          {:ok, third, control} <-
-           step(Visitor.new("D", accept_language: asked), control_url(target.url)) do
+           step(Visitor.new("D", accept_language: asked), unseen_url(target.url)) do
       facts = {
         primed.observation.set_cookie?,
         served.observation.cache_status == :hit,
@@ -280,6 +291,22 @@ defmodule LocalizeCacheProbe.Scenario do
       {verdict, summary} = vary_lines_verdict(Enum.flat_map(checks, &line_check/1))
 
       {:ok, result(:vary_lines, verdict, summary, header_steps ++ cookie_steps)}
+    end
+  end
+
+  def run(:second_choice, %Target{locales: [asked, chosen | _rest]} = target) do
+    # Both visitors choose through one URL, which nothing has requested
+    # before the first of them does.
+    choose_url = unseen_url(Target.choose_url(target, chosen))
+
+    with {:ok, first, first_steps} <-
+           choice(Visitor.new("A", accept_language: asked), choose_url, target),
+         {:ok, second, second_steps} <-
+           choice(Visitor.new("B", accept_language: asked), choose_url, target) do
+      facts = {language?(first, chosen), language?(second, chosen)}
+      {verdict, summary} = second_choice_verdict(facts, chosen)
+
+      {:ok, result(:second_choice, verdict, summary, first_steps ++ second_steps)}
     end
   end
 
@@ -396,7 +423,7 @@ defmodule LocalizeCacheProbe.Scenario do
 
     with {:ok, _first, primed} <- step(first, url),
          {:ok, _second, served} <- step(second, url),
-         {:ok, _third, control} <- step(third, control_url(url)) do
+         {:ok, _third, control} <- step(third, unseen_url(url)) do
       labels = %{
         who: "The visitor whose browser asked for #{second_locale}",
         wanted: second_locale,
@@ -418,8 +445,8 @@ defmodule LocalizeCacheProbe.Scenario do
     # A requests the page twice: a cache that will not store the response
     # that sets A's cookie can store the one after it.
     with {:ok, _first, primed} <- visits(first, target.url, 2, []),
-         {:ok, second, chosen} <- step(second, Target.choose_url(target, stored)),
-         {:ok, second, control} <- step(second, control_url(target.url)),
+         {:ok, second, chosen} <- step(second, unseen_url(Target.choose_url(target, stored))),
+         {:ok, second, control} <- step(second, unseen_url(target.url)),
          {:ok, _second, served} <- step(second, target.url) do
       labels = %{
         who: "The visitor who chose #{stored}",
@@ -431,6 +458,33 @@ defmodule LocalizeCacheProbe.Scenario do
 
       {:ok, outcome, primed ++ [chosen, control, served]}
     end
+  end
+
+  # A visitor chooses a locale, then asks for the page at a URL no cache
+  # has stored. The second observation is what the application serves
+  # them, which is the chosen locale only if the choice was stored.
+  defp choice(visitor, choose_url, target) do
+    with {:ok, visitor, chosen} <- step(visitor, choose_url),
+         {:ok, _visitor, control} <- step(visitor, unseen_url(target.url)) do
+      {:ok, control.observation, [chosen, control]}
+    end
+  end
+
+  defp second_choice_verdict({false, _second?}, chosen) do
+    {:skipped,
+     "The application did not serve #{chosen} to the first visitor who chose it: it does " <>
+       "not store the choice, or the choose URL is wrong."}
+  end
+
+  defp second_choice_verdict({true, true}, chosen) do
+    {:correct, "Each visitor who chose #{chosen} was served #{chosen} afterwards."}
+  end
+
+  defp second_choice_verdict({true, false}, chosen) do
+    {:choice_lost,
+     "The first visitor who chose #{chosen} was remembered and the second was not. The page " <>
+       "that stores a choice was stored itself, and the second visitor was served it " <>
+       "without a cookie of their own."}
   end
 
   # Where a field is named among the `vary` lines of a response that has
@@ -511,10 +565,13 @@ defmodule LocalizeCacheProbe.Scenario do
     "line #{line} of #{lines} vary lines"
   end
 
-  # The page's URL with a parameter no request has carried before, so
-  # that a cache has nothing stored for it and the application answers.
-  defp control_url(url) do
-    token = Integer.to_string(System.system_time(:microsecond))
+  # A URL with a parameter no request has carried before, so that a cache
+  # has nothing stored for it and the application answers. It makes a
+  # control request out of the page's URL, and gives a scenario a choose
+  # URL that no earlier scenario has left in the cache.
+  defp unseen_url(url) do
+    unique = System.unique_integer([:positive, :monotonic])
+    token = Integer.to_string(System.system_time(:microsecond)) <> Integer.to_string(unique)
 
     url
     |> URI.parse()

@@ -69,7 +69,7 @@ defmodule LocalizeCacheProbe.ScenarioTest do
       assert again =~ "GET /pricing HTTP/1.1"
       assert again =~ ~r/\r\ncookie: s=a\r\n/i
 
-      assert chosen =~ "GET /pricing?locale=de HTTP/1.1"
+      assert chosen =~ ~r{GET /pricing\?locale=de&_probe=\d+ HTTP/1\.1}
       refute chosen =~ ~r/\r\ncookie:/i
 
       assert control =~ ~r{GET /pricing\?_probe=\d+ HTTP/1\.1}
@@ -228,7 +228,8 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         region: :correct,
         url_locale: :not_reused,
         first_visit: :not_reused,
-        vary_lines: :correct
+        vary_lines: :correct,
+        second_choice: :correct
       ],
       # Once the session holds the locale it decides, so `vary` names
       # only the cookie and a longer accept-language is served the copy.
@@ -241,7 +242,8 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         region: :correct,
         url_locale: :shared,
         first_visit: :not_reused,
-        vary_lines: :correct
+        vary_lines: :correct,
+        second_choice: :correct
       ],
       # This cache replays the cookie it stored with the first response, so
       # both visitors end up holding it and cannot be told apart.
@@ -254,7 +256,8 @@ defmodule LocalizeCacheProbe.ScenarioTest do
         region: :wrong_language,
         url_locale: :shared,
         first_visit: :shared_cookie,
-        vary_lines: :wrong_language
+        vary_lines: :wrong_language,
+        second_choice: :correct
       ]
     }
 
@@ -545,6 +548,46 @@ defmodule LocalizeCacheProbe.ScenarioTest do
                Scenario.run(:vary_lines, target(responses(languages, @two_lines)))
 
       assert summary =~ "did not serve the locales needed"
+    end
+  end
+
+  describe "the second-choice scenario" do
+    test "has both visitors choose through one URL that nothing has requested before" do
+      target = target([cookie("a"), page("de"), cookie("b"), page("de")])
+
+      assert {:ok, result} = Scenario.run(:second_choice, target)
+      assert result.verdict == :correct
+      assert Enum.map(result.steps, & &1.visitor) == ["A", "A", "B", "B"]
+
+      [first_choice, first_control, second_choice, second_control] = requests(result)
+
+      assert [_line, choose_url] =
+               Regex.run(~r{GET (/pricing\?locale=de&_probe=\d+) HTTP}, first_choice)
+
+      assert second_choice =~ "GET #{choose_url} HTTP/1.1"
+      refute first_choice =~ ~r/\r\ncookie:/i
+      refute second_choice =~ ~r/\r\ncookie:/i
+
+      assert first_control =~ ~r{GET /pricing\?_probe=\d+ HTTP/1\.1}
+      assert first_control =~ ~r/\r\ncookie: s=a\r\n/i
+      assert second_control =~ ~r/\r\ncookie: s=b\r\n/i
+      refute first_control =~ choose_url
+    end
+
+    test "is :choice_lost when the second visitor is not served the locale they chose" do
+      stored = page("de", [{"Age", "0"}])
+
+      assert {:ok, %{verdict: :choice_lost, summary: summary}} =
+               Scenario.run(:second_choice, target([cookie("a"), page("de"), stored, page("fr")]))
+
+      assert summary =~ "the second was not"
+    end
+
+    test "is :skipped when the first visitor is not served the locale they chose" do
+      target = target([page("de"), page("fr"), page("de"), page("fr")])
+
+      assert {:ok, %{verdict: :skipped, summary: summary}} = Scenario.run(:second_choice, target)
+      assert summary =~ "it does not store the choice"
     end
   end
 
