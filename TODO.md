@@ -20,6 +20,8 @@ Work planned for the Localize cache probe. It grew out of [localize_web issue 28
 
 ## Done
 
+* [x] **A cache inside the application on a normalised header** — `/normalised/page` rewrites `accept-language` to the resolved locale before `PlugHTTPCache`, with `PutLocale, vary: false`; correct and shared on its own, and a wrong language behind Varnish or nginx. 2026-11-17.
+
 * [x] **Go private with `PutSession.stored?/1`** — `/private-session` and `/chosen-private` ask `localize_web` whether the session was written, in place of reading a Plug-internal key, with the same verdicts behind all three caches. 2026-11-17.
 
 * [x] **`/chosen` on the real option** — the reference origin uses `Localize.Plug.PutSession, from: [...]` from `localize_web` 1.4.0 in place of its own sketch, with the same verdicts; `/chosen-private` goes private on a session write, after going private by source kept the URL-locale page out of every cache. 2026-11-17.

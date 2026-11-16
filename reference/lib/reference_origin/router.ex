@@ -13,6 +13,7 @@ defmodule ReferenceOrigin.Router do
   | `/private-session/page` | `ReferenceOrigin.PrivateSession` |
   | `/chosen/page` | `ReferenceOrigin.Chosen` |
   | `/chosen-private/page` | `ReferenceOrigin.ChosenPrivate` |
+  | `/normalised/page` | `ReferenceOrigin.Normalised` |
 
   Each also answers with a locale in the path, such as
   `/default/de/page`, which `Localize.Plug.PutLocale` reads through its
@@ -64,6 +65,9 @@ defmodule ReferenceOrigin.Router do
 
   get "/chosen-private/page", to: ReferenceOrigin.ChosenPrivate
   get "/chosen-private/:locale/page", to: ReferenceOrigin.ChosenPrivate
+
+  get "/normalised/page", to: ReferenceOrigin.Normalised
+  get "/normalised/:locale/page", to: ReferenceOrigin.Normalised
 
   match _ do
     send_resp(conn, 404, "not found")

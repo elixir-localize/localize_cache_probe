@@ -80,6 +80,7 @@ Each scenario starts from whatever the cache already holds, so an earlier scenar
 | `/private-session/page` | The default configuration, with `cache-control: private` on a response that writes the session. |
 | `/chosen/page` | The default sources, with `PutSession, from: [:route, :path, :query, :body]`: only a locale the visitor chose is stored. |
 | `/chosen-private/page` | `/chosen/page` and `/private-session/page` together. |
+| `/normalised/page` | A cache inside the application that keys on a normalised `accept-language`, with `vary: false`. |
 
 Each also answers with a locale in the path, such as `/default/de/page`.
 
@@ -170,6 +171,25 @@ Three configurations try changes that came out of these results. `/private-sessi
 * **Both together are correct behind all three caches and lose no choice.**
 
 * **Make a response private when the session is written, not whenever the locale came from the URL.** A first version of `/chosen-private` sent `private` for any request whose locale came from a stored source. A locale in the path is on every request for that page, so the page with the locale in its URL was never stored: "Locale in the URL: not cached" behind all three. `Localize.Plug.PutSession.stored?/1`, also new in 1.4.0, says when the plug wrote the session, and both configurations now use it.
+
+### A cache inside the application, on a normalised header
+
+`/normalised` is the setup the author of `plug_http_cache` described on the `localize_web` issue. The locale is resolved and stored first. The request's `accept-language` is then rewritten to the locale that was resolved, `PlugHTTPCache` comes next inside the pipeline, and the response declares `vary: accept-language` itself, with `PutLocale, vary: false`. The first column is that application with nothing in front of it, on port 4010; the other two put Varnish and nginx in front of it.
+
+| Scenario | In the application | Behind Varnish | Behind nginx |
+|---|---|---|---|
+| Different locales | correct | correct | correct |
+| Stored locale | correct | wrong language | wrong language |
+| Two header forms | shared | not shared | not shared |
+| Two regions | correct | correct | correct |
+| First visit | reused | reused | reused |
+| Second choice | correct | correct | correct |
+
+* **On its own it is the best result of any configuration.** Every visitor gets the right language, two new visitors share a copy, and a longer `accept-language` for the same locale is served the same copy, because the cache sees the header after it is normalised.
+
+* **No choice is lost, with no `cache-control: private`.** The session plugs run before the cache, on a hit as on a miss, so the session cookie is written even when the page comes from the cache.
+
+* **It is wrong behind a second cache.** A cache in front sees the request as the browser sent it and is told only `vary: accept-language`. A visitor whose session holds `de` and whose browser asks for `fr` is served the stored `fr` page. The rewrite has to be done again in that cache, as its author says.
 
 ## Recognising the cache
 

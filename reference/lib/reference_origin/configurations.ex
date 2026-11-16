@@ -205,3 +205,54 @@ defmodule ReferenceOrigin.ChosenPrivate do
   defdelegate private_when_session_written(conn, options),
     to: ReferenceOrigin.PrivateSession
 end
+
+defmodule ReferenceOrigin.Normalised do
+  @moduledoc """
+  A cache inside the application that keys on a normalised
+  `accept-language`, as described by the author of `plug_http_cache`.
+
+  The locale is resolved first, from the URL, the session or the header,
+  and stored in the session. The request's `accept-language` is then
+  rewritten to the locale that was resolved, so a visitor whose session
+  holds `de` and whose browser asks for `fr` reaches the cache asking
+  for `de`. `PlugHTTPCache` comes next, inside this pipeline and not in
+  front of the router, and the response declares `vary: accept-language`
+  itself, so `Localize.Plug.PutLocale` is told to send none.
+
+  The session plugs run before the cache on every request, a hit
+  included, so the session cookie is written whether or not the page
+  comes from the cache.
+
+  The rewrite happens inside the application. A cache in front of it
+  sees the request as the browser sent it, and is told only that the
+  response varies on `accept-language`.
+
+  """
+
+  use Plug.Builder
+
+  plug Localize.Plug.PutLocale, vary: false
+  plug Localize.Plug.PutSession
+  plug :normalise_accept_language
+  plug PlugHTTPCache, %{store: :http_cache_store_memory}
+  plug :vary_on_accept_language
+  plug :render
+
+  defdelegate render(conn, options), to: ReferenceOrigin.Page
+
+  @doc false
+  def normalise_accept_language(conn, _options) do
+    case Localize.Plug.PutLocale.get_locale(conn) do
+      %Localize.LanguageTag{cldr_locale_id: locale_id} when not is_nil(locale_id) ->
+        Plug.Conn.put_req_header(conn, "accept-language", to_string(locale_id))
+
+      _other ->
+        conn
+    end
+  end
+
+  @doc false
+  def vary_on_accept_language(conn, _options) do
+    Plug.Conn.prepend_resp_headers(conn, [{"vary", "accept-language"}])
+  end
+end
