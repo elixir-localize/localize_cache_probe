@@ -1,0 +1,45 @@
+# TODO
+
+Work planned for the Localize cache probe. It grew out of [localize_web issue 28](https://github.com/elixir-localize/localize_web/issues/28), which is where the scenarios come from.
+
+## Open
+
+* [ ] **Run it through a hosted cache** — Cloudflare, Fastly, CloudFront, Google Cloud CDN, Azure Front Door and Akamai are known only from their documentation. Each needs the origin reachable from the internet and an account, which are Kip's to set up.
+
+* [ ] **Notice when two visitors hold the same cookie** — the reference origin's session holds only the locale, so every visitor with one locale gets an identical signed cookie. The two-visitor scenario then says "each with a cookie of their own" when they have one between them, and the shared-cookie verdict would fire without a replay. Compare the jars and say so.
+
+* [ ] **A configuration with a session value of the visitor's own** — add a path to the reference origin that puts a random token in the session, as a CSRF token does, so both kinds of cookie can be probed.
+
+* [ ] **A scenario for two `vary` lines** — the report says when `vary` arrived on more than one line, and a cache that reads only the first shows up as a wrong language in the first two scenarios. A scenario of its own needs an origin that is known to send two lines, which is the reference origin.
+
+* [ ] **Start each scenario from a clean cache** — an earlier scenario leaves pages in the cache that change what a later one finds. Behind Varnish and nginx with `vary: false`, the first scenario passes only because nothing is stored yet. A query parameter of its own for each scenario would separate them.
+
+* [ ] **Tests for the reference origin** — it has none; its behaviour is checked only by running the probe against it.
+
+* [ ] **Say when the page redirects** — a redirect is not followed, so a page that redirects gives every scenario an inconclusive verdict with no language. Name the `location` in the report and suggest probing that URL.
+
+* [ ] **Vary notes for Fastly, Varnish, nginx and `http_cache`** — read each project's documentation and add a note with its source, as the other vendors have.
+
+* [ ] **CI workflow** — the standard matrix does not apply to an application on one toolchain; add a single lint and test row.
+
+* [ ] **Limit the body the client reads** — `LocalizeCacheProbe.HTTP.get/2` reads a whole response into memory; stop at a few megabytes.
+
+## Done
+
+* [x] **Three caches in front of the reference origin** — `plug_http_cache` on port 4011, and Varnish and nginx in Docker; the probe's verdicts for all four configurations are in the README. 2026-11-17.
+
+* [x] **A control request for the language verdicts** — the same kind of visitor asks at a URL no cache has seen, so a wrong language no longer needs a cache header and an application that stores no choice is skipped, not failed. 2026-11-17.
+
+* [x] **Reference origin** — `reference/` serves four `Localize.Plug.PutLocale` configurations from the sibling `localize_web` checkout, each at a path of its own, and the probe's eight scenarios run against it with no cache in front. 2026-11-17.
+
+* [x] **Six more scenarios** — different locales, two visitors with one locale, two forms of one header, two regions, a locale in the URL and a first visit that sets a cookie, with `--regions` and `--localized-url`; a shared cookie also exits with status 1. 2026-11-17.
+
+* [x] **`mix cache.probe URL`** — runs every scenario against a page and prints a report, with `--locales`, `--param` and `--choose-url`; exits with status 1 on a wrong language served from a cache. 2026-11-17.
+
+* [x] **The first two scenarios** — `LocalizeCacheProbe.Scenario` plays a visitor with a stored locale after another visitor's page is cached, and one visitor three times, and `LocalizeCacheProbe.Report` tabulates them. 2026-11-17.
+
+* [x] **HTTP fetch and a visitor with a cookie jar** — `LocalizeCacheProbe.HTTP.get/2` makes one `GET` with Mint and keeps every header line, and `LocalizeCacheProbe.Visitor.visit/2` requests a URL as a visitor and keeps the cookies it is sent. 2026-11-17.
+
+* [x] **Observation of one response** — `LocalizeCacheProbe.Observation.new/3` records the language served, the `vary` lines, `cache-control`, `set-cookie` and the cache status. 2026-11-17.
+
+* [x] **Cache recognition** — `LocalizeCacheProbe.Cache` names the cache from response headers, reads hit or miss, and records what Akamai, Cloudflare, CloudFront, Google Cloud CDN and Azure Front Door document about `vary`. 2026-11-17.

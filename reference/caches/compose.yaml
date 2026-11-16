@@ -1,0 +1,25 @@
+# Two caches in front of the reference origin. Start the origin on the
+# host first (`mix run --no-halt` in `reference/`, port 4010), then:
+#
+#   docker compose -f reference/caches/compose.yaml up -d
+#
+# Varnish listens on 4020 and nginx on 4030.
+
+services:
+  varnish:
+    image: varnish:7.6
+    ports:
+      - "4020:80"
+    volumes:
+      - ./varnish/default.vcl:/etc/varnish/default.vcl:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    image: nginx:1.27
+    ports:
+      - "4030:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
